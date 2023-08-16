@@ -1,0 +1,102 @@
+import Cocoa
+import Foundation
+
+class SecureClipboardManager: NSObject, NSMenuDelegate {
+    let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    var isSecureClipboardEnabled = false
+    var isMonitoringEnabled = false
+    var clipboardClearDuration: TimeInterval = 60.0 // Default: 60 seconds
+    var clearClipboardTimer: Timer?
+    
+    override init() {
+        super.init()
+        
+        setupStatusMenu()
+    }
+    
+    func setupStatusMenu() {
+        if let button = statusItem.button {
+            button.image = NSImage(named: "AppIcon") // Placeholder for your SVG logo
+        }
+        
+        let menu = NSMenu()
+        menu.delegate = self
+        
+        let enableSecureClipboardItem = NSMenuItem(title: "Enable Secure Clipboard", action: #selector(toggleSecureClipboard), keyEquivalent: "")
+        enableSecureClipboardItem.state = isSecureClipboardEnabled ? .on : .off
+        menu.addItem(enableSecureClipboardItem)
+        
+        let toggleMonitoringItem = NSMenuItem(title: "Toggle Monitoring", action: #selector(toggleMonitoring), keyEquivalent: "")
+        toggleMonitoringItem.state = isMonitoringEnabled ? .on : .off
+        menu.addItem(toggleMonitoringItem)
+        
+        let encryptionSubMenu = NSMenu()
+        let encryptionTypeItem = NSMenuItem(title: "Encryption Type", action: nil, keyEquivalent: "")
+        encryptionTypeItem.submenu = encryptionSubMenu
+        menu.addItem(encryptionTypeItem)
+        
+        // Add encryption type options to the submenu
+        encryptionSubMenu.addItem(NSMenuItem(title: "AES-128 GCM", action: nil, keyEquivalent: ""))
+        encryptionSubMenu.addItem(NSMenuItem(title: "AES-256 GCM", action: nil, keyEquivalent: ""))
+        
+        let encryptionToggleItem = NSMenuItem(title: "Encryption On/Off", action: #selector(toggleEncryption), keyEquivalent: "")
+        encryptionToggleItem.state = isSecureClipboardEnabled ? .on : .off
+        menu.addItem(encryptionToggleItem)
+        
+        let timerSubMenu = NSMenu()
+        let timerItem = NSMenuItem(title: "Timer", action: nil, keyEquivalent: "")
+        timerItem.submenu = timerSubMenu
+        menu.addItem(timerItem)
+        
+        timerSubMenu.addItem(NSMenuItem(title: "Clear Clipboard Timer", action: #selector(toggleTimer), keyEquivalent: ""))
+        
+        statusItem.menu = menu
+    }
+    
+    @objc func toggleSecureClipboard(_ sender: NSMenuItem) {
+        isSecureClipboardEnabled.toggle()
+        sender.state = isSecureClipboardEnabled ? .on : .off
+        // Implement enabling/disabling secure clipboard
+    }
+    
+    @objc func toggleMonitoring(_ sender: NSMenuItem) {
+        isMonitoringEnabled.toggle()
+        sender.state = isMonitoringEnabled ? .on : .off
+        // Implement toggling monitoring
+    }
+    
+    @objc func toggleEncryption(_ sender: NSMenuItem) {
+        isSecureClipboardEnabled.toggle()
+        sender.state = isSecureClipboardEnabled ? .on : .off
+        // Implement toggling encryption
+    }
+    
+    @objc func toggleTimer(_ sender: NSMenuItem) {
+        if let button = statusItem.button, let window = button.window {
+            let alert = NSAlert()
+            alert.messageText = "Set Clipboard Clear Timer"
+            alert.informativeText = "Enter the duration (in seconds) for clearing the clipboard:"
+            alert.alertStyle = .informational
+            
+            let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
+            textField.stringValue = String(format: "%.0f", clipboardClearDuration)
+            alert.accessoryView = textField
+            
+            alert.addButton(withTitle: "OK")
+            alert.addButton(withTitle: "Cancel")
+            
+            let response = alert.runModal()
+            
+            if response == .alertFirstButtonReturn {
+                if let duration = Double(textField.stringValue) {
+                    clipboardClearDuration = duration
+                }
+            }
+        }
+    }
+    
+    // ... (other methods)
+}
+
+let _ = SecureClipboardManager()
+RunLoop.main.run()
