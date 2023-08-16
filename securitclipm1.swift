@@ -1,88 +1,113 @@
+import Foundation
+import Security
+import os.secureEnclave
 
-//By TT 2023
-// This function generates a one-time key that is used to encrypt the clipboard contents.
-func generateOneTimeKey() -> [UInt8] {
-  // Get the secure enclave from the M1 chip.
-  let secureEnclave = SecureEnclave.shared
+class SecureClipboardManager: NSObject {
+    private var clipboard = NSPasteboard.general
+    private var keyGenerator: Timer!
+    private var currentKey: [UInt8] = []
+    private var previousChangeCount = 0
+    private var isSecureClipboardEnabled = false
 
-  // Generate a 256-bit random key.
-  let key = secureEnclave.generateRandomBytes(count: 32)
+    override init() {
+        super.init()
 
-  // Return the key.
-  return key
-}
+        clipboard.addObserver(self, forKeyPath: "changeCount", options: .new, context: nil)
 
-// This function encrypts the clipboard contents using the given key.
-func encryptClipboardContents(contents: Data, key: [UInt8]) -> Data {
-  // Create a cipher using the key.
-  let cipher = try! Cipher.init(encryptionAlgorithm: .aes128GCM, key: key)
-
-  // Encrypt the contents.
-  let encryptedContents = cipher.encrypt(data: contents)
-
-  // Return the encrypted contents.
-  return encryptedContents
-}
-
-// This function decrypts the clipboard contents using the given key.
-func decryptClipboardContents(contents: Data, key: [UInt8]) -> Data {
-  // Create a cipher using the key.
-  let cipher = try! Cipher.init(decryptionAlgorithm: .aes128GCM, key: key)
-
-  // Decrypt the contents.
-  let decryptedContents = cipher.decrypt(data: contents)
-
-  // Return the decrypted contents.
-  return decryptedContents
-}
-
-// This function is called when the bootloader starts.
-func bootloaderEntry() {
-  // Get the system clipboard.
-  let clipboard = NSPasteboard.general
-
-  // Create a listener for clipboard changes.
-  clipboard.addObserver(self, forKeyPath: "contents", options: [.new], context: nil)
-
-  // Start generating one-time keys.
-  let keyGenerator = Timer(interval: 1.0, repeats: true) { timer in
-    let key = generateOneTimeKey()
-
-    // Encrypt the clipboard contents using the key.
-    let encryptedContents = encryptClipboardContents(contents: clipboard.data, key: key)
-
-    // Set the clipboard contents to the encrypted contents.
-    clipboard.setData(encryptedContents, forType: .string)
-  }
-
-  keyGenerator.start()
-
-  // Wait for the user to press a key.
-  while true {
-    let key = readLine()!
-
-    if key == "paste" {
-      // Check the user's fingerprint.
-      let success = authenticateWithTouchID()
-
-      if success {
-        // Decrypt the clipboard contents and paste them.
-        let decryptedContents = decryptClipboardContents(contents: clipboard.data, key: keyGenerator.currentKey)
-        clipboard.clearContents()
-        clipboard.setData(decryptedContents, forType: .string)
-      }
+        keyGenerator = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
+            guard let self = self else { return }
+            self.currentKey = self.generateOneTimeKey()
+            self.encryptClipboardContents()
+        }
     }
-  }
+
+    func generateOneTimeKey() -> [UInt8] {
+        let secureEnclave = SecureEnclave.shared
+        return secureEnclave.generateRandomBytes(count: 32)
+    }
+
+    func enableSecureClipboard() {
+        isSecureClipboardEnabled = true
+        print("Secure clipboard enabled")
+    }
+
+    func disableSecureClipboard() {
+        isSecureClipboardEnabled = false
+        print("Secure clipboard disabled")
+    }
+
+    func encryptClipboardContents() {
+        guard let clipboardData = clipboard.data(forType: .string) else {
+            return
+        }
+        let encryptedContents = encryptClipboardContents(contents: clipboardData, key: currentKey)
+        clipboard.clearContents()
+        clipboard.setData(encryptedContents, forType: .string)
+        print("Clipboard contents encrypted")
+    }
+
+    func decryptClipboardContents() {
+        guard let encryptedData = clipboard.data(forType: .string) else {
+            return
+        }
+        let decryptedContents = decryptClipboardContents(contents: encryptedData, key: currentKey)
+        clipboard.clearContents()
+        clipboard.setString(decryptedContents, forType: .string)
+        print("Clipboard contents decrypted")
+    }
+
+    func showAlert(message: String) -> Bool {
+        print("ALERT: \(message)")
+        // Implement your alert mechanism here
+        // Return true if user decides to take action, false otherwise
+        return false
+    }
+
+    // Monitor clipboard changes
+    override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {
+        if keyPath == "changeCount" {
+            // Clipboard was changed
+            let newChangeCount = clipboard.changeCount
+            if newChangeCount != previousChangeCount {
+                previousChangeCount = newChangeCount
+                if clipboard.data(forType: .string) != nil {
+                    if isSecureClipboardEnabled && showAlert(message: "Copy action detected. Continue?") {
+                        encryptClipboardContents()
+                    }
+                }
+            }
+        }
+    }
+
+    deinit {
+        clipboard.removeObserver(self, forKeyPath: "changeCount")
+        keyGenerator.invalidate()
+    }
 }
 
-// This function is called when the clipboard contents change.
-func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {
-  // If the clipboard contents have changed, encrypt them using the current one-time key.
-  if keyPath == "contents" {
-    let key = keyGenerator.currentKey
-    let encryptedContents = encryptClipboardContents(contents: clipboard.data, key: key)
-    clipboard.setData(encryptedContents, forType: .string)
-  }
+let clipboardManager = SecureClipboardManager()
+
+// Parse CLI commands
+if CommandLine.arguments.count > 1 {
+    let command = CommandLine.arguments[1]
+    switch command {
+    case "start":
+        clipboardManager.startMonitoring()
+    case "stop":
+        clipboardManager.stopMonitoring()
+    case "enable":
+        clipboardManager.enableSecureClipboard()
+    case "disable":
+        clipboardManager.disableSecureClipboard()
+    case "status":
+        clipboardManager.showStatus()
+    default:
+        print("Unknown command: \(command)")
+    }
+} else {
+    // Default behavior, start monitoring clipboard changes
+    clipboardManager.startMonitoring()
+    
+    // Enter a run loop to keep the app running
+    RunLoop.main.run()
 }
-
-
